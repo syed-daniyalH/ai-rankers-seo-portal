@@ -1,0 +1,391 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  CLIENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum ClientStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum SectionKind {
+  OVERVIEW
+  GBP
+  WEBSITE
+  CUSTOM
+}
+
+enum DisplayType {
+  NUMBER_CARD
+  PERCENT_CARD
+  LINE_CHART
+  BAR_CHART
+  AREA_CHART
+  PROGRESS
+  TABLE
+}
+
+enum ValueFormat {
+  INTEGER
+  DECIMAL
+  PERCENT
+  CURRENCY
+  DURATION_SECONDS
+  RANK
+}
+
+enum DataSource {
+  MANUAL
+  GSC
+  GA4
+  GBP
+  DATAFORSEO
+}
+
+enum ActivityStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum GoalCondition {
+  GREATER_THAN_OR_EQUAL
+  LESS_THAN_OR_EQUAL
+  EQUALS
+}
+
+enum GoalStatus {
+  ACTIVE
+  ACHIEVED
+  PAUSED
+  ARCHIVED
+}
+
+enum FeedbackCategory {
+  ISSUE
+  QUESTION
+  REQUEST
+  PRAISE
+}
+
+enum FeedbackStatus {
+  OPEN
+  REVIEWED
+  RESOLVED
+}
+
+model User {
+  id              String             @id @default(cuid())
+  authUserId      String?            @unique
+  email           String             @unique
+  name            String
+  passwordHash    String?
+  role            Role
+  status          UserStatus         @default(INVITED)
+  clientId        String?
+  client          Client?            @relation(fields: [clientId], references: [id])
+  allClients      Boolean            @default(false)
+  assignedClients ClientAdmin[]
+  sentInvitations ClientInvitation[] @relation("InvitationSender")
+  createdGoals    Goal[]             @relation("GoalCreator")
+  goalAnnotations GoalAnnotation[]   @relation("GoalAnnotationCreator")
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  auditLogs       AuditLog[]
+  assignedTasks   Task[]             @relation("TaskAssignee")
+  requestedTasks  Task[]             @relation("TaskRequester")
+  feedbackSubmissions Feedback[]
+}
+
+model Client {
+  id            String             @id @default(cuid())
+  businessName  String
+  slug          String             @unique
+  brandMark     String?
+  brandAccent   String             @default("#F26B38")
+  websiteUrl    String?
+  contactEmail  String?
+  timezone      String             @default("America/New_York")
+  hasWebsiteSeo Boolean            @default(false)
+  hasGbpSeo     Boolean            @default(false)
+  status        ClientStatus       @default(ACTIVE)
+  users         User[]
+  admins        ClientAdmin[]
+  invitations   ClientInvitation[]
+  sections      Section[]
+  metrics       Metric[]
+  activities    Activity[]
+  reports       Report[]
+  versions      DashboardVersion[]
+  goals         Goal[]
+  auditLogs     AuditLog[]
+  tasks         Task[]
+  feedback      Feedback[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+}
+
+model ClientAdmin {
+  clientId String
+  userId   String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([clientId, userId])
+  @@index([userId])
+}
+
+model ClientInvitation {
+  id          String           @id @default(cuid())
+  clientId    String
+  email       String
+  role        Role             @default(CLIENT)
+  tokenHash   String           @unique
+  status      InvitationStatus @default(PENDING)
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  invitedById String
+  client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  invitedBy   User             @relation("InvitationSender", fields: [invitedById], references: [id], onDelete: Restrict)
+  createdAt   DateTime         @default(now())
+
+  @@index([clientId, status])
+  @@index([email, status])
+  @@index([expiresAt])
+}
+
+model Section {
+  id        String      @id @default(cuid())
+  clientId  String
+  name      String
+  kind      SectionKind
+  position  Int         @default(0)
+  isVisible Boolean     @default(true)
+  isDraft   Boolean     @default(true)
+  client    Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  metrics   Metric[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([clientId, position])
+}
+
+model Metric {
+  id             String        @id @default(cuid())
+  clientId       String
+  sectionId      String
+  key            String
+  name           String
+  description    String?
+  displayType    DisplayType   @default(NUMBER_CARD)
+  valueFormat    ValueFormat   @default(INTEGER)
+  source         DataSource    @default(MANUAL)
+  higherIsBetter Boolean       @default(true)
+  position       Int           @default(0)
+  isVisible      Boolean       @default(true)
+  isDraft        Boolean       @default(true)
+  client         Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  section        Section       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  values         MetricValue[]
+  goals          Goal[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@unique([clientId, key])
+  @@index([clientId, sectionId, position])
+}
+
+model Goal {
+  id          String           @id @default(cuid())
+  clientId    String
+  metricId    String?
+  createdById String?
+  name        String
+  description String?
+  condition   GoalCondition    @default(GREATER_THAN_OR_EQUAL)
+  target      Decimal          @db.Decimal(18, 4)
+  startDate   DateTime
+  endDate     DateTime
+  status      GoalStatus       @default(ACTIVE)
+  isVisible   Boolean          @default(true)
+  client      Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  metric      Metric?          @relation(fields: [metricId], references: [id], onDelete: SetNull)
+  createdBy   User?            @relation("GoalCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  annotations GoalAnnotation[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@index([clientId, status, endDate])
+  @@index([metricId])
+}
+
+model GoalAnnotation {
+  id          String   @id @default(cuid())
+  goalId      String
+  createdById String?
+  title       String
+  body        String?
+  happenedAt  DateTime
+  isVisible   Boolean  @default(true)
+  goal        Goal     @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  createdBy   User?    @relation("GoalAnnotationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([goalId, happenedAt])
+}
+
+model MetricValue {
+  id          String     @id @default(cuid())
+  metricId    String
+  periodStart DateTime
+  periodEnd   DateTime
+  value       Decimal    @db.Decimal(18, 4)
+  source      DataSource
+  note        String?
+  isOverride  Boolean    @default(false)
+  metric      Metric     @relation(fields: [metricId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@unique([metricId, periodStart, periodEnd, source])
+  @@index([metricId, periodStart])
+}
+
+model DashboardVersion {
+  id          String   @id @default(cuid())
+  clientId    String
+  version     Int
+  label       String?
+  snapshot    Json
+  publishedAt DateTime @default(now())
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, version])
+  @@index([clientId, publishedAt])
+}
+
+model Activity {
+  id          String         @id @default(cuid())
+  clientId    String
+  title       String
+  description String?
+  category    String
+  status      ActivityStatus @default(PLANNED)
+  completedAt DateTime?
+  client      Client         @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([clientId, status, createdAt])
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  clientId      String
+  title         String
+  description   String?
+  category      String       @default("Client request")
+  status        TaskStatus   @default(TODO)
+  priority      TaskPriority @default(NORMAL)
+  assigneeId    String?
+  requesterId   String?
+  dueDate       DateTime?
+  completedAt   DateTime?
+  clientVisible Boolean      @default(true)
+  client        Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  assignee      User?        @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  requester     User?        @relation("TaskRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([clientId, status, dueDate])
+  @@index([assigneeId, status])
+}
+
+model Feedback {
+  id        String           @id @default(cuid())
+  clientId  String
+  userId    String
+  category  FeedbackCategory
+  message   String
+  pagePath  String
+  pageLabel String
+  context   Json?
+  status    FeedbackStatus    @default(OPEN)
+  client    Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([clientId, status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  clientId    String
+  title       String
+  type        String
+  periodLabel String
+  storageKey  String?
+  isVisible   Boolean  @default(true)
+  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([clientId, createdAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  clientId   String?
+  actorId    String
+  action     String
+  entityType String
+  entityId   String?
+  before     Json?
+  after      Json?
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  actor      User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  createdAt  DateTime @default(now())
+
+  @@index([clientId, createdAt])
+  @@index([actorId, createdAt])
+}
